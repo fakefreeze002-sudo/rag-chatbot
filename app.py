@@ -188,8 +188,15 @@ st.set_page_config(page_title="화성시 민원 챗봇", page_icon="🏙️")
 st.title("🏙️ RAG 기반 화성시 민원 챗봇")
 st.caption("data 폴더의 문서만으로 답변하며, 자료에 없을 때만 외부 웹 검색 결과를 별도로 표시합니다.")
 
-if "question_to_search" not in st.session_state:
-    st.session_state.question_to_search = ""
+st.session_state.setdefault("question_to_search", "")
+st.session_state.setdefault("run_search", False)
+st.session_state.setdefault("selected_topic", None)
+
+
+def search_selected_topic() -> None:
+    """Callback: retain the user's topic choice before Streamlit reruns."""
+    st.session_state.selected_topic = st.session_state.topic_choice
+    st.session_state.run_search = True
 
 question = st.text_input("민원 질문을 입력하세요", value=st.session_state.question_to_search, placeholder="예: 대형폐기물은 어떻게 버리나요?")
 search_clicked = st.button("질문하기", type="primary")
@@ -208,6 +215,7 @@ if search_clicked and question.strip():
         st.info(f"다음과 같이 정리한 질문이 맞나요?\n\n**{normalized}**")
     else:
         st.session_state.question_to_search = normalized
+        st.session_state.selected_topic = None
         st.session_state.run_search = True
 
 if "pending_normalized" in st.session_state:
@@ -222,19 +230,20 @@ if "pending_normalized" in st.session_state:
 
 if st.session_state.pop("run_search", False):
     active_question = st.session_state.question_to_search
+    selected_topic = st.session_state.selected_topic
+    retrieval_query = f"{active_question} {selected_topic}" if selected_topic else active_question
     with st.spinner("문서를 검색하고 있습니다..."):
-        local_results = search_local(collection, openai_client, active_question)
+        local_results = search_local(collection, openai_client, retrieval_query)
     relevant = [r for r in local_results if r["distance"] <= LOCAL_DISTANCE_THRESHOLD]
     choices = ambiguous_topics(local_results)
-    if choices and "clarified" not in active_question:
+    if choices and not selected_topic:
         st.warning("서로 다른 유형의 안내가 함께 검색되었습니다. 어느 분야인지 선택해 주세요.")
-        selected = st.radio("추가 확인", choices, horizontal=True)
-        if st.button("선택한 분야로 다시 검색"):
-            st.session_state.question_to_search = f"{active_question} (분야: {selected}, clarified)"
-            st.session_state.run_search = True
-            st.rerun()
+        st.radio("추가 확인", choices, horizontal=True, key="topic_choice")
+        st.button("선택한 분야로 다시 검색", on_click=search_selected_topic)
     elif relevant:
         st.subheader("답변")
+        if selected_topic:
+            st.caption(f"선택 분야: {selected_topic}")
         st.write(local_answer(openai_client, active_question, relevant))
         show_sources(relevant)
     else:
