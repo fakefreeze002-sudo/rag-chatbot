@@ -191,11 +191,16 @@ st.caption("data 폴더의 문서만으로 답변하며, 자료에 없을 때만
 st.session_state.setdefault("question_to_search", "")
 st.session_state.setdefault("run_search", False)
 st.session_state.setdefault("selected_topic", None)
+st.session_state.setdefault("pending_topic_choices", [])
+st.session_state.setdefault("pending_topic_question", "")
 
 
 def search_selected_topic() -> None:
     """Callback: retain the user's topic choice before Streamlit reruns."""
     st.session_state.selected_topic = st.session_state.topic_choice
+    st.session_state.question_to_search = st.session_state.pending_topic_question
+    st.session_state.pending_topic_choices = []
+    st.session_state.pending_topic_question = ""
     st.session_state.run_search = True
 
 question = st.text_input("민원 질문을 입력하세요", value=st.session_state.question_to_search, placeholder="예: 대형폐기물은 어떻게 버리나요?")
@@ -209,6 +214,10 @@ except Exception as exc:
     st.stop()
 
 if search_clicked and question.strip():
+    st.session_state.selected_topic = None
+    st.session_state.pending_topic_choices = []
+    st.session_state.pending_topic_question = ""
+    st.session_state.pop("topic_choice", None)
     normalized, needs_confirmation = normalize_question(openai_client, question.strip())
     if needs_confirmation:
         st.session_state.pending_normalized = normalized
@@ -237,9 +246,8 @@ if st.session_state.pop("run_search", False):
     relevant = [r for r in local_results if r["distance"] <= LOCAL_DISTANCE_THRESHOLD]
     choices = ambiguous_topics(local_results)
     if choices and not selected_topic:
-        st.warning("서로 다른 유형의 안내가 함께 검색되었습니다. 어느 분야인지 선택해 주세요.")
-        st.radio("추가 확인", choices, horizontal=True, key="topic_choice")
-        st.button("선택한 분야로 다시 검색", on_click=search_selected_topic)
+        st.session_state.pending_topic_choices = choices
+        st.session_state.pending_topic_question = active_question
     elif relevant:
         st.subheader("답변")
         if selected_topic:
@@ -259,3 +267,14 @@ if st.session_state.pop("run_search", False):
         else:
             st.subheader("답변")
             st.write("자료에서 확인할 수 없습니다")
+
+if st.session_state.pending_topic_choices:
+    st.warning("서로 다른 유형의 안내가 함께 검색되었습니다. 어느 분야인지 선택해 주세요.")
+    st.radio(
+        "추가 확인",
+        st.session_state.pending_topic_choices,
+        horizontal=True,
+        key="topic_choice",
+        persist_state="page",
+    )
+    st.button("선택한 분야로 다시 검색", on_click=search_selected_topic)
